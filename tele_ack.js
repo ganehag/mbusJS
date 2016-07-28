@@ -3,7 +3,7 @@ function TelegramACK() {
     this.type = 0xE5;
 }
 
-exports = {
+module.exports = {
     parse: function(data) {
         if(data && data.length < 1) {
             throw "Invalid M-Bus length";

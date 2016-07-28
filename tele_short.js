@@ -1,6 +1,6 @@
 function TelegramShort(dbuf) {
-    this._header = new TelegramHeader()
-    this._header.load(dbuf)
+    this._header = new TelegramHeader();
+    this._header.load(dbuf);
 
     if(!this.check_crc()) {
         throw "crc error";
@@ -22,7 +22,7 @@ TelegramShort.prototype.check_crc = function(first_argument) {
     return this.compute_crc() === this.header().crcField.parts[0];
 };
 
-exports = {
+module.exports = {
     parse: function(data) {
         if(data && data.length < 5) {
             throw "Invalid M-Bus length";

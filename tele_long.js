@@ -27,6 +27,7 @@ function TelegramLong(dbuf) {
 
 TelegramLong.prototype.get = function() {
     return {
+        header: this.header.get(),
         body: this.body.get()
     };
 };

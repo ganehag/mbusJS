@@ -1,11 +1,39 @@
-function getKeyByValue(obj, value) {
-    for(var prop in obj) {
-        if(obj.hasOwnProperty(prop)) {
-             if(obj[prop] === value)
-                 return prop;
-        }
-    }
-}
+/*
+ * Constants
+ */
+function Constants() {
+    this.MBUS_FRAME_ACK_START      = 0xE5;
+    this.MBUS_FRAME_SHORT_START    = 0x10;
+    this.MBUS_FRAME_CONTROL_START  = 0x68;
+    this.MBUS_FRAME_LONG_START     = 0x68;
+    this.MBUS_FRAME_STOP           = 0x16;
+
+    this.MBUS_CONTROL_MASK_SND_NKE = 0x40;
+    this.MBUS_CONTROL_MASK_DIR_M2S = 0x40;
+    this.MBUS_CONTROL_MASK_REQ_UD2 = 0x5B;
+
+    this.MBUS_VARIABLE_DATA_MEDIUM_OTHER = 0x00;
+    this.MBUS_VARIABLE_DATA_MEDIUM_OIL = 0x01;
+    this.MBUS_VARIABLE_DATA_MEDIUM_ELECTRICITY = 0x02;
+    this.MBUS_VARIABLE_DATA_MEDIUM_GAS = 0x03;
+    this.MBUS_VARIABLE_DATA_MEDIUM_HEAT_OUT = 0x04;
+    this.MBUS_VARIABLE_DATA_MEDIUM_STEAM = 0x05;
+    this.MBUS_VARIABLE_DATA_MEDIUM_HOT_WATER = 0x06;
+    this.MBUS_VARIABLE_DATA_MEDIUM_WATER = 0x07;
+    this.MBUS_VARIABLE_DATA_MEDIUM_HEAT_COST = 0x08;
+    this.MBUS_VARIABLE_DATA_MEDIUM_COMPR_AIR = 0x09;
+    this.MBUS_VARIABLE_DATA_MEDIUM_COOL_OUT = 0x0A;
+    this.MBUS_VARIABLE_DATA_MEDIUM_COOL_IN = 0x0B;
+    this.MBUS_VARIABLE_DATA_MEDIUM_HEAT_IN = 0x0C;
+    this.MBUS_VARIABLE_DATA_MEDIUM_HEAT_COOL = 0x0D;
+    this.MBUS_VARIABLE_DATA_MEDIUM_BUS = 0x0E;
+    this.MBUS_VARIABLE_DATA_MEDIUM_UNKNOWN = 0x0F;
+    this.MBUS_VARIABLE_DATA_MEDIUM_COLD_WATER = 0x16;
+    this.MBUS_VARIABLE_DATA_MEDIUM_DUAL_WATER = 0x17;
+    this.MBUS_VARIABLE_DATA_MEDIUM_PRESSURE = 0x18;
+    this.MBUS_VARIABLE_DATA_MEDIUM_ADC = 0x19;
+};
+
 
 /*
  * TelegramField
@@ -201,7 +229,8 @@ TelegramBodyHeader.prototype.load = function(data) {
     }
 };
 TelegramBodyHeader.prototype.getIdNr = function() {
-    return this.id_nr_field.parts.reverse();
+    return this.id_nr_field.decodeBCD();
+    // return this.id_nr_field.parts.reverse();
 };
 TelegramBodyHeader.prototype.isLSBOrder = function() {
     return ! (this.ci_field.parts[0] & this.BYTE_ORDER_MASK);
@@ -210,7 +239,7 @@ TelegramBodyHeader.prototype.get = function() {
     return {
         type: this.ci_field.parts[0],
         identification: this.getIdNr(),
-        manufactorer: this.manufacturer_field.decodeManufacturer(),
+        manufacturer: this.manufacturer_field.decodeManufacturer(),
         version: this.version_field.parts[0],
         medium: this.measure_medium_field.parts[0],
         access_no: this.acc_nr_field.parts[0],
@@ -374,19 +403,19 @@ TelegramVariableDataRecord.prototype.parseVifx = function() {
     var vife = this.vib.parts.slice(1);
     var vtf_ebm = this.EXTENSION_BIT_MASK;
 
-    if(vif == VIFUnit.FIRST_EXT_VIF_CODES) {
+    if(vif == VIFUnit.FIRST_EXT_VIF_CODES.value) {
         code = (vife[0] & this.UNIT_MULTIPLIER_MASK) | 0x200;
 
-    } else if(vif == VIFUnit.SECOND_EXT_VIF_CODES) {
+    } else if(vif == VIFUnit.SECOND_EXT_VIF_CODES.value) {
         code = (vife[0] & this.UNIT_MULTIPLIER_MASK) | 0x100;
 
-    } else if([VIFUnit.VIF_FOLLOWING, 0xFC].indexOf(vif) !== -1) {
+    } else if([VIFUnit.VIF_FOLLOWING.value, 0xFC].indexOf(vif) !== -1) {
         if(vif & vtf_ebm) {
             code = vife[0] & this.UNIT_MULTIPLIER_MASK;
             robj.factor = 1;
 
             if (0x70 <= code && code <= 0x77) {
-                rob.factor = Math.pow(10.0, (vife[0] & 0x07) - 6);
+                robj.factor = Math.pow(10.0, (vife[0] & 0x07) - 6);
             } else if(0x78 <= code && code <= 0x7B) {
                 robj.factor = Math.pow(10.0, (vife[0] & 0x03) - 3);
             } else if(code == 0x7D) {
@@ -398,7 +427,7 @@ TelegramVariableDataRecord.prototype.parseVifx = function() {
 
             return robj;
         }
-    } else if(vif == VIFUnit.VIF_FOLLOWING) {
+    } else if(vif == VIFUnit.VIF_FOLLOWING.value) {
         return {
             factor: 1,
             unit: "FixMe",
@@ -424,7 +453,7 @@ TelegramVariableDataRecord.prototype.parseVifx = function() {
         type: vtl[2]
     };
 };
-TelegramVariableDataRecord.prototype.unit = function() {
+TelegramVariableDataRecord.prototype.getUnit = function() {
     var r = this.parseVifx();
     return r.unit;
 };
@@ -488,13 +517,15 @@ TelegramVariableDataRecord.prototype.get = function() {
     return {
         value: this.parsedValue(),
         unit: robj.unit,
-        type: robj.type,
-        function: this.dib.functionType(),
-        functionstring: this.dib.functionType(true)
+        type: robj.type.toString(),
+        function: this.dib.functionType().toString(),
     };
 };
 
 
+/*
+ * DataInformationBlock
+ */
 function DataInformationBlock() {
     TelegramField.call(this);
     this.EXTENSION_BIT_MASK = 0x80;      // 1000 0000
@@ -502,7 +533,6 @@ function DataInformationBlock() {
     this.DATA_FIELD_MASK    = 0x0F;      // 0000 1111
 }
 DataInformationBlock.prototype = Object.create(TelegramField.prototype);
-
 DataInformationBlock.prototype.hasExtensionBit = function() {
     // Check for extension bit on last byte
     return this.parts.length ? (this.parts[this.parts.length-1] & this.EXTENSION_BIT_MASK) > 0 : false;
@@ -515,7 +545,7 @@ DataInformationBlock.prototype.isEOUD= function() {
     // Check for end of user data bit VIF byte
     return this.parts.length ? ([0x0F, 0x1F]).indexOf(this.parts[0]) !== -1 : false;
 };
-DataInformationBlock.prototype.functionType = function(returnKey) {
+DataInformationBlock.prototype.functionType = function() {
     var rval = null;
 
     if(this.parts[0] == 0x0F) {
@@ -523,12 +553,8 @@ DataInformationBlock.prototype.functionType = function(returnKey) {
 
     } else if(this.parts[0] == 0x2F) {
         rval = FunctionType.SPECIAL_FUNCTION_FILL_BYTE;
-    }
-
-    rval = (this.parts[0] & this.FUNCTION_MASK) >> 4;
-
-    if(returnKey === true) {
-        return getKeyByValue(FunctionType, rval);
+    } else {
+        rval = FunctionType.find((this.parts[0] & this.FUNCTION_MASK) >> 4);    
     }
 
     return rval;
@@ -560,6 +586,9 @@ DataInformationBlock.prototype.lengthEncoding = function() {
     };
 };
 
+/*
+ * ValueInformationBlock
+ */
 function ValueInformationBlock() {
     TelegramField.call(this);
 
@@ -569,7 +598,6 @@ function ValueInformationBlock() {
     this.customVIF = new TelegramField();
 }
 ValueInformationBlock.prototype = Object.create(TelegramField.prototype);
-
 ValueInformationBlock.prototype.hasExtensionBit = function() {
     return this.parts.length ? (this.parts[this.parts.length-1] & this.EXTENSION_BIT_MASK) > 0 : false;
 };
@@ -581,6 +609,9 @@ ValueInformationBlock.prototype.hasLVarBit = function() {
 };
 
 
+/*
+ * TelegramBody
+ */
 function TelegramBody(dbuf) {
     this.header = new TelegramBodyHeader();
     this.payload = new TelegramBodyPayload(null, this);
@@ -589,7 +620,7 @@ function TelegramBody(dbuf) {
 TelegramBody.prototype.get = function() {
     return {
         header: this.header.get(),
-        records: this.payload.get()
+        records: this.payload.get().records
     };
 };
 TelegramBody.prototype.load = function(data) {
@@ -608,12 +639,12 @@ function TelegramACK() {
     this.type = 0xE5;
 }
 TelegramACK.prototype.parse = function(data) {
-    if(data && data.length < 1) {
-        throw "Invalid M-Bus length";
+    if(data.length && data[0] !== 0xE5) {
+        throw "Frame Mismatch";
     }
 
-    if(data[0] !== 0xE5) {
-        throw "Frame Mismatch"
+    if(data && data.length < 1) {
+        throw "Invalid M-Bus length";
     }
 };
 
@@ -632,12 +663,12 @@ TelegramLong.prototype.get = function() {
     };
 };
 TelegramLong.prototype.parse = function(data) {
-    if(data && data.length < 9) {
-        throw "Invalid M-Bus length";
-    }
-
     if(data[0] !== 0x68) {
         throw "Frame Mismatch"
+    }
+
+    if(data && data.length < 9) {
+        throw "Invalid M-Bus length";
     }
 
     var tgr = data;
@@ -667,29 +698,32 @@ function TelegramShort() {
     this.header = new TelegramHeader();
 }
 TelegramShort.prototype.compute_crc = function() {
-    // FIXME
-    // return this.header().cField.
+    return (this.header.cField.parts[0] + this.header.aField.parts[0]) % 256;
 };
 TelegramShort.prototype.check_crc = function() {
     return this.compute_crc() === this.header.crcField.parts[0];
 };
 TelegramShort.prototype.parse = function(data) {
-     if(data && data.length < 5) {
-        throw "Invalid M-Bus length";
+    if(data.length && data[0] !== 0x10) {
+        throw "Frame Mismatch"
     }
 
-    if(data[0] !== 0x10) {
-        throw "Frame Mismatch"
+    if(data && data.length < 5) {
+        throw "Invalid M-Bus length";
     }
 
     this.header.load(data);
     if(!this.check_crc()) {
-        throw "crc error";
+        throw "CRC Error";
     }
+};
+TelegramShort.prototype.toString = function() {
+    return "\x10" + String.fromCharCode(this.header.cField.parts[0]) + String.fromCharCode(this.header.aField.parts[0]) + String.fromCharCode(this.compute_crc()) + "\x16";
 };
 
 
-var MeasureUnit = {
+
+const MeasureUnit = {
     KWH: "kWh",
     WH: "WH",
     J: "J",
@@ -724,16 +758,33 @@ var MeasureUnit = {
     DBM: "dBm"
 }
 
-var FunctionType = {
-    INSTANTANEOUS_VALUE: 0,
-    MAXIMUM_VALUE: 1,
-    MINIMUM_VALUE: 2,
-    ERROR_STATE_VALUE: 3,
-    SPECIAL_FUNCTION: 4,
-    SPECIAL_FUNCTION_FILL_BYTE: 5
-}
+var FunctionType = function(name, value) {
+    this.name = name;
+    this.value = value;
+};
+FunctionType.prototype.toString = function() {
+    return "FunctionType." + this.name;
+};
+FunctionType.find = function(value) {
+    for (var key in this) {
+        if(!this.hasOwnProperty(key)) {
+            continue;
+        }
+        if(this[key].value === value) {
+            return this[key];
+        }
+    }
+    return null;
+};
+FunctionType.INSTANTANEOUS_VALUE = new FunctionType("INSTANTANEOUS_VALUE", 0);
+FunctionType.MAXIMUM_VALUE = new FunctionType("MAXIMUM_VALUE", 1);
+FunctionType.MINIMUM_VALUE = new FunctionType("MINIMUM_VALUE", 2);
+FunctionType.ERROR_STATE_VALUE = new FunctionType("ERROR_STATE_VALUE", 3);
+FunctionType.SPECIAL_FUNCTION = new FunctionType("SPECIAL_FUNCTION", 4);
+FunctionType.SPECIAL_FUNCTION_FILL_BYTE = new FunctionType("SPECIAL_FUNCTION_FILL_BYTE", 5);
 
-var DataEncoding = {
+
+const DataEncoding = {
     ENCODING_NULL: 0,
     ENCODING_INTEGER: 1,
     ENCODING_REAL: 2,
@@ -741,128 +792,136 @@ var DataEncoding = {
     ENCODING_VARIABLE_LENGTH: 4
 }
 
-var VIFUnit = {
-    ENERGY_WH: 0x07,                // E000 0xxx
-    ENERGY_J: 0x0F,                 // E000 1xxx
-    VOLUME: 0x17,                   // E001 0xxx
-    MASS: 0x1F,                     // E001 1xxx
-    ON_TIME: 0x23,                  // E010 00xx
-    OPERATING_TIME: 0x27,           // E010 01xx
-    POWER_W: 0x2F,                  // E010 1xxx
-    POWER_J_H: 0x37,                // E011 0xxx
-    VOLUME_FLOW: 0x3F,              // E011 1xxx
-    VOLUME_FLOW_EXT: 0x47,          // E100 0xxx
-    VOLUME_FLOW_EXT_S: 0x4F,        // E100 1xxx
-    MASS_FLOW: 0x57,                // E101 0xxx
-    FLOW_TEMPERATURE: 0x5B,         // E101 10xx
-    RETURN_TEMPERATURE: 0x5F,       // E101 11xx
-    TEMPERATURE_DIFFERENCE: 0x63,   // E110 00xx
-    EXTERNAL_TEMPERATURE: 0x67,     // E110 01xx
-    PRESSURE: 0x6B,                 // E110 10xx
-    DATE: 0x6C,                     // E110 1100
-    DATE_TIME_GENERAL: 0x6D,        // E110 1101
-    DATE_TIME: 0x6D,                // E110 1101
-    EXTENTED_TIME: 0x6D,            // E110 1101
-    EXTENTED_DATE_TIME: 0x6D,       // E110 1101
-    UNITS_FOR_HCA: 0x6E,            // E110 1110
-    RES_THIRD_VIFE_TABLE: 0x6F,     // E110 1111
-    AVG_DURATION: 0x73,             // E111 00xx
-    ACTUALITY_DURATION: 0x77,       // E111 01xx
-    FABRICATION_NO: 0x78,           // E111 1000
-    IDENTIFICATION: 0x79,           // E111 1001
-    ADDRESS: 0x7A,                  // E111 1010
+var VIFUnit = function(name, value) {
+    this.name = name;
+    this.value = value;
+};
+VIFUnit.prototype.toString = function() {
+    return "VIFUnit." + this.name;
+};
+VIFUnit.ENERGY_WH = new VIFUnit("ENERGY_WH", 0x07); // E000 0xxx
+VIFUnit.ENERGY_J = new VIFUnit("ENERGY_J", 0x0F);  // E000 1xxx
+VIFUnit.VOLUME = new VIFUnit("VOLUME", 0x17);  // E001 0xxx
+VIFUnit.MASS = new VIFUnit("MASS", 0x1F);  // E001 1xxx
+VIFUnit.ON_TIME = new VIFUnit("ON_TIME", 0x23);  // E010 00xx
+VIFUnit.OPERATING_TIME = new VIFUnit("OPERATING_TIME", 0x27);  // E010 01xx
+VIFUnit.POWER_W = new VIFUnit("POWER_W", 0x2F);  // E010 1xxx
+VIFUnit.POWER_J_H = new VIFUnit("POWER_J_H", 0x37);  // E011 0xxx
+VIFUnit.VOLUME_FLOW = new VIFUnit("VOLUME_FLOW", 0x3F);  // E011 1xxx
+VIFUnit.VOLUME_FLOW_EXT = new VIFUnit("VOLUME_FLOW_EXT", 0x47);  // E100 0xxx
+VIFUnit.VOLUME_FLOW_EXT_S = new VIFUnit("VOLUME_FLOW_EXT_S", 0x4F);  // E100 1xxx
+VIFUnit.MASS_FLOW = new VIFUnit("MASS_FLOW", 0x57);  // E101 0xxx
+VIFUnit.FLOW_TEMPERATURE = new VIFUnit("FLOW_TEMPERATURE", 0x5B);  // E101 10xx
+VIFUnit.RETURN_TEMPERATURE = new VIFUnit("RETURN_TEMPERATURE", 0x5F);  // E101 11xx
+VIFUnit.TEMPERATURE_DIFFERENCE = new VIFUnit("TEMPERATURE_DIFFERENCE", 0x63);  // E110 00xx
+VIFUnit.EXTERNAL_TEMPERATURE = new VIFUnit("EXTERNAL_TEMPERATURE", 0x67);  // E110 01xx
+VIFUnit.PRESSURE = new VIFUnit("PRESSURE", 0x6B);  // E110 10xx
+VIFUnit.DATE = new VIFUnit("DATE", 0x6C);  // E110 1100
+VIFUnit.DATE_TIME_GENERAL = new VIFUnit("DATE_TIME_GENERAL", 0x6D);  // E110 1101
+VIFUnit.DATE_TIME = new VIFUnit("DATE_TIME", 0x6D);  // E110 1101
+VIFUnit.EXTENTED_TIME = new VIFUnit("EXTENTED_TIME", 0x6D);  // E110 1101
+VIFUnit.EXTENTED_DATE_TIME = new VIFUnit("EXTENTED_DATE_TIME", 0x6D);  // E110 1101
+VIFUnit.UNITS_FOR_HCA = new VIFUnit("UNITS_FOR_HCA", 0x6E);  // E110 1110
+VIFUnit.RES_THIRD_VIFE_TABLE = new VIFUnit("RES_THIRD_VIFE_TABLE", 0x6F);  // E110 1111
+VIFUnit.AVG_DURATION = new VIFUnit("AVG_DURATION", 0x73);  // E111 00xx
+VIFUnit.ACTUALITY_DURATION = new VIFUnit("ACTUALITY_DURATION", 0x77);  // E111 01xx
+VIFUnit.FABRICATION_NO = new VIFUnit("FABRICATION_NO", 0x78);  // E111 1000
+VIFUnit.IDENTIFICATION = new VIFUnit("IDENTIFICATION", 0x79);  // E111 1001
+VIFUnit.ADDRESS = new VIFUnit("ADDRESS", 0x7A);  // E111 1010
 
-    // NOT THE ONES FOR SPECIAL PURPOSES
-    FIRST_EXT_VIF_CODES: 0xFB,      // 1111 1011
-    VARIABLE_VIF: 0xFC,             // E111 1111
-    VIF_FOLLOWING: 0x7C,            // E111 1100
-    SECOND_EXT_VIF_CODES: 0xFD,     // 1111 1101
-    THIRD_EXT_VIF_CODES_RES: 0xEF,  // 1110 1111
-    ANY_VIF: 0x7E,                  // E111 1110
-    MANUFACTURER_SPEC: 0x7F         // E111 1111
-}
+// NOT THE ONES FOR SPECIAL PURPOSES
+VIFUnit.FIRST_EXT_VIF_CODES = new VIFUnit("FIRST_EXT_VIF_CODES", 0xFB);  // 1111 1011
+VIFUnit.VARIABLE_VIF = new VIFUnit("VARIABLE_VIF", 0xFC);  // E111 1111
+VIFUnit.VIF_FOLLOWING = new VIFUnit("VIF_FOLLOWING", 0x7C);  // E111 1100
+VIFUnit.SECOND_EXT_VIF_CODES = new VIFUnit("SECOND_EXT_VIF_CODES", 0xFD);  // 1111 1101
+VIFUnit.THIRD_EXT_VIF_CODES_RES = new VIFUnit("THIRD_EXT_VIF_CODES_RES", 0xEF);  // 1110 1111
+VIFUnit.ANY_VIF = new VIFUnit("ANY_VIF", 0x7E);  // E111 1110
+VIFUnit.MANUFACTURER_SPEC = new VIFUnit("MANUFACTURER_SPEC", 0x7F);  // E111 1111
 
-var VIFUnitExt = {
-    // Currency Units
-    CURRENCY_CREDIT: 0x03,  // E000 00nn Credit of 10 nn-3 of the nominal ...
-    CURRENCY_DEBIT: 0x07,   // E000 01nn Debit of 10 nn-3 of the nominal ...
+var VIFUnitExt = function(name, value) {
+    this.name = name;
+    this.value = value;
+};
+VIFUnitExt.prototype.toString = function() {
+    return "VIFUnitExt." + this.name;
+};
+// Currency Units
+VIFUnitExt.CURRENCY_CREDIT = new VIFUnitExt("CURRENCY_CREDIT", 0x03);  // E000 00nn Credit of 10 nn-3 of the nominal ...
+VIFUnitExt.CURRENCY_DEBIT = new VIFUnitExt("CURRENCY_DEBIT", 0x07);  // E000 01nn Debit of 10 nn-3 of the nominal ...
+// Enhanced Identification
+VIFUnitExt.ACCESS_NUMBER = new VIFUnitExt("ACCESS_NUMBER", 0x08);  // E000 1000 Access Number [transmission count]
+VIFUnitExt.MEDIUM = new VIFUnitExt("MEDIUM", 0x09);  // E000 1001 Medium [as in fixed header]
+VIFUnitExt.MANUFACTURER = new VIFUnitExt("MANUFACTURER", 0x0A);  // E000 1010 Manufacturer [as in fixed header]
+VIFUnitExt.PARAMETER_SET_ID = new VIFUnitExt("PARAMETER_SET_ID", 0x0B);  // E000 1011 Parameter set identification Enha ...
+VIFUnitExt.MODEL_VERSION = new VIFUnitExt("MODEL_VERSION", 0x0C);  // E000 1100 Model / Version
+VIFUnitExt.HARDWARE_VERSION = new VIFUnitExt("HARDWARE_VERSION", 0x0D);  // E000 1101 Hardware version //
+VIFUnitExt.FIRMWARE_VERSION = new VIFUnitExt("FIRMWARE_VERSION", 0x0E);  // E000 1110 Firmware version //
+VIFUnitExt.SOFTWARE_VERSION = new VIFUnitExt("SOFTWARE_VERSION", 0x0F);  // E000 1111 Software version //
+// Implementation of all TC294 WG1 requirements [improved selection ..]
+VIFUnitExt.CUSTOMER_LOCATION = new VIFUnitExt("CUSTOMER_LOCATION", 0x10);  // E001 0000 Customer location
+VIFUnitExt.CUSTOMER = new VIFUnitExt("CUSTOMER", 0x11);  // E001 0001 Customer
+VIFUnitExt.ACCESS_CODE_USER = new VIFUnitExt("ACCESS_CODE_USER", 0x12);  // E001 0010 Access Code User
+VIFUnitExt.ACCESS_CODE_OPERATOR = new VIFUnitExt("ACCESS_CODE_OPERATOR", 0x13);  // E001 0011 Access Code Operator
+VIFUnitExt.ACCESS_CODE_SYSTEM_OPERATOR = new VIFUnitExt("ACCESS_CODE_SYSTEM_OPERATOR", 0x14);  // E001 0100 Access Code System Operator
+VIFUnitExt.ACCESS_CODE_DEVELOPER = new VIFUnitExt("ACCESS_CODE_DEVELOPER", 0x15);  // E001 0101 Access Code Developer
+VIFUnitExt.PASSWORD = new VIFUnitExt("PASSWORD", 0x16);  // E001 0110 Password
+VIFUnitExt.ERROR_FLAGS = new VIFUnitExt("ERROR_FLAGS", 0x17);  // E001 0111 Error flags [binary]
+VIFUnitExt.ERROR_MASKS = new VIFUnitExt("ERROR_MASKS", 0x18);  // E001 1000 Error mask
+VIFUnitExt.RESERVED = new VIFUnitExt("RESERVED", 0x19);  // E001 1001 Reserved
+VIFUnitExt.DIGITAL_OUTPUT = new VIFUnitExt("DIGITAL_OUTPUT", 0x1A);  // E001 1010 Digital Output [binary]
+VIFUnitExt.DIGITAL_INPUT = new VIFUnitExt("DIGITAL_INPUT", 0x1B);  // E001 1011 Digital Input [binary]
+VIFUnitExt.BAUDRATE = new VIFUnitExt("BAUDRATE", 0x1C);  // E001 1100 Baudrate [Baud]
+VIFUnitExt.RESPONSE_DELAY = new VIFUnitExt("RESPONSE_DELAY", 0x1D);  // E001 1101 response delay time
+VIFUnitExt.RETRY = new VIFUnitExt("RETRY", 0x1E);  // E001 1110 Retry
+VIFUnitExt.RESERVED_2 = new VIFUnitExt("RESERVED_2", 0x1F);  // E001 1111 Reserved
+// Enhanced storage management
+VIFUnitExt.FIRST_STORAGE_NR = new VIFUnitExt("FIRST_STORAGE_NR", 0x20);  // E010 0000 First storage
+VIFUnitExt.LAST_STORAGE_NR = new VIFUnitExt("LAST_STORAGE_NR", 0x21);  // E010 0001 Last storage
+VIFUnitExt.SIZE_OF_STORAGE_BLOCK = new VIFUnitExt("SIZE_OF_STORAGE_BLOCK", 0x22);  // E010 0010 Size of storage block
+VIFUnitExt.RESERVED_3 = new VIFUnitExt("RESERVED_3", 0x23);  // E010 0011 Reserved
+VIFUnitExt.STORAGE_INTERVAL = new VIFUnitExt("STORAGE_INTERVAL", 0x27);  // E010 01nn Storage interval
+VIFUnitExt.STORAGE_INTERVAL_MONTH = new VIFUnitExt("STORAGE_INTERVAL_MONTH", 0x28);  // E010 1000 Storage interval month[s]
+VIFUnitExt.STORAGE_INTERVAL_YEARS = new VIFUnitExt("STORAGE_INTERVAL_YEARS", 0x29);  // E010 1001 Storage interval year[s]
+// E010 1010 Reserved
+// E010 1011 Reserved
+VIFUnitExt.DURATION_SINCE_LAST_READOUT = new VIFUnitExt("DURATION_SINCE_LAST_READOUT", 0x2F);  // E010 11nn Duration since last ...
+//  Enhanced tarif management
+VIFUnitExt.START_OF_TARIFF = new VIFUnitExt("START_OF_TARIFF", 0x30);  // E011 0000 Start [date/time] of tariff
+VIFUnitExt.DURATION_OF_TARIFF = new VIFUnitExt("DURATION_OF_TARIFF", 0x3);  // E011 00nn Duration of tariff
+VIFUnitExt.PERIOD_OF_TARIFF = new VIFUnitExt("PERIOD_OF_TARIFF", 0x37);  // E011 01nn Period of tariff
+VIFUnitExt.PERIOD_OF_TARIFF_MONTH = new VIFUnitExt("PERIOD_OF_TARIFF_MONTH", 0x38);  // E011 1000 Period of tariff months[s]
+VIFUnitExt.PERIOD_OF_TARIFF_YEARS = new VIFUnitExt("PERIOD_OF_TARIFF_YEARS", 0x39);  // E011 1001 Period of tariff year[s]
+VIFUnitExt.DIMENSIONLESS = new VIFUnitExt("DIMENSIONLESS", 0x3A);  // E011 1010 dimensionless / no VIF
+// E011 1011 Reserved
+// E011 11xx Reserved
+// Electrical units
+VIFUnitExt.VOLTS = new VIFUnitExt("VOLTS", 0x4F);  // E100 nnnn 10 nnnn-9 Volts
+VIFUnitExt.AMPERE = new VIFUnitExt("AMPERE", 0x5F);  // E101 nnnn 10 nnnn-12 A
+VIFUnitExt.RESET_COUNTER = new VIFUnitExt("RESET_COUNTER", 0x60);  // E110 0000 Reset counter
+VIFUnitExt.CUMULATION_COUNTER = new VIFUnitExt("CUMULATION_COUNTER", 0x61);  // E110 0001 Cumulation counter
+VIFUnitExt.CONTROL_SIGNAL = new VIFUnitExt("CONTROL_SIGNAL", 0x62);  // E110 0010 Control signal
+VIFUnitExt.DAY_OF_WEEK = new VIFUnitExt("DAY_OF_WEEK", 0x63);  // E110 0011 Day of week
+VIFUnitExt.WEEK_NUMBER = new VIFUnitExt("WEEK_NUMBER", 0x64);  // E110 0100 Week number
+VIFUnitExt.TIME_POINT_OF_DAY_CHANGE = new VIFUnitExt("TIME_POINT_OF_DAY_CHANGE", 0x65);  // E110 0101 Time point of day ...
+VIFUnitExt.STATE_OF_PARAMETER_ACTIVATION = new VIFUnitExt("STATE_OF_PARAMETER_ACTIVATION", 0x66);  // E110 0110 State of parameter
+VIFUnitExt.SPECIAL_SUPPLIER_INFORMATION = new VIFUnitExt("SPECIAL_SUPPLIER_INFORMATION", 0x67);  // E110 0111 Special supplier ...
+VIFUnitExt.DURATION_SINCE_LAST_CUMULATION = new VIFUnitExt("DURATION_SINCE_LAST_CUMULATION", 0x6B);  // E110 10pp Duration since last
+VIFUnitExt.OPERATING_TIME_BATTERY = new VIFUnitExt("OPERATING_TIME_BATTERY", 0x6F);  // E110 11pp Operating time battery
+VIFUnitExt.DATEAND_TIME_OF_BATTERY_CHANGE = new VIFUnitExt("DATEAND_TIME_OF_BATTERY_CHANGE", 0x70);  // E111 0000 Date and time of bat...
+// E111 0001 to E111 1111 Reserved
+VIFUnitExt.RSSI = new VIFUnitExt("RSSI", 0x71);  // E111 0001 RSSI
 
-    // Enhanced Identification
-    ACCESS_NUMBER: 0x08,     // E000 1000 Access Number [transmission count]
-    MEDIUM: 0x09,            // E000 1001 Medium [as in fixed header]
-    MANUFACTURER: 0x0A,      // E000 1010 Manufacturer [as in fixed header]
-    PARAMETER_SET_ID: 0x0B,  // E000 1011 Parameter set identification Enha ...
-    MODEL_VERSION: 0x0C,     // E000 1100 Model / Version
-    HARDWARE_VERSION: 0x0D,  // E000 1101 Hardware version //
-    FIRMWARE_VERSION: 0x0E,  // E000 1110 Firmware version //
-    SOFTWARE_VERSION: 0x0F,  // E000 1111 Software version //
-
-    // Implementation of all TC294 WG1 requirements [improved selection ..]
-    CUSTOMER_LOCATION: 0x10,            // E001 0000 Customer location
-    CUSTOMER: 0x11,                     // E001 0001 Customer
-    ACCESS_CODE_USER: 0x12,             // E001 0010 Access Code User
-    ACCESS_CODE_OPERATOR: 0x13,         // E001 0011 Access Code Operator
-    ACCESS_CODE_SYSTEM_OPERATOR: 0x14,  // E001 0100 Access Code System Operator
-    ACCESS_CODE_DEVELOPER: 0x15,        // E001 0101 Access Code Developer
-    PASSWORD: 0x16,                     // E001 0110 Password
-    ERROR_FLAGS: 0x17,                  // E001 0111 Error flags [binary]
-    ERROR_MASKS: 0x18,                  // E001 1000 Error mask
-    RESERVED: 0x19,                     // E001 1001 Reserved
-    DIGITAL_OUTPUT: 0x1A,               // E001 1010 Digital Output [binary]
-    DIGITAL_INPUT: 0x1B,                // E001 1011 Digital Input [binary]
-    BAUDRATE: 0x1C,                     // E001 1100 Baudrate [Baud]
-    RESPONSE_DELAY: 0x1D,               // E001 1101 response delay time
-    RETRY: 0x1E,                        // E001 1110 Retry
-    RESERVED_2: 0x1F,                   // E001 1111 Reserved
-
-    // Enhanced storage management
-    FIRST_STORAGE_NR: 0x20,             // E010 0000 First storage
-    LAST_STORAGE_NR: 0x21,              // E010 0001 Last storage
-    SIZE_OF_STORAGE_BLOCK: 0x22,        // E010 0010 Size of storage block
-    RESERVED_3: 0x23,                   // E010 0011 Reserved
-    STORAGE_INTERVAL: 0x27,             // E010 01nn Storage interval
-    STORAGE_INTERVAL_MONTH: 0x28,       // E010 1000 Storage interval month[s]
-    STORAGE_INTERVAL_YEARS: 0x29,       // E010 1001 Storage interval year[s]
-
-    // E010 1010 Reserved
-    // E010 1011 Reserved
-    DURATION_SINCE_LAST_READOUT: 0x2F,  // E010 11nn Duration since last ...
-
-    //  Enhanced tarif management
-    START_OF_TARIFF: 0x30,              // E011 0000 Start [date/time] of tariff
-    DURATION_OF_TARIFF: 0x3,            // E011 00nn Duration of tariff
-    PERIOD_OF_TARIFF: 0x37,             // E011 01nn Period of tariff
-    PERIOD_OF_TARIFF_MONTH: 0x38,       // E011 1000 Period of tariff months[s]
-    PERIOD_OF_TARIFF_YEARS: 0x39,       // E011 1001 Period of tariff year[s]
-    DIMENSIONLESS: 0x3A,                // E011 1010 dimensionless / no VIF
-
-    // E011 1011 Reserved
-    // E011 11xx Reserved
-    // Electrical units
-    VOLTS: 0x4F,                            // E100 nnnn 10 nnnn-9 Volts
-    AMPERE: 0x5F,                           // E101 nnnn 10 nnnn-12 A
-    RESET_COUNTER: 0x60,                    // E110 0000 Reset counter
-    CUMULATION_COUNTER: 0x61,               // E110 0001 Cumulation counter
-    CONTROL_SIGNAL: 0x62,                   // E110 0010 Control signal
-    DAY_OF_WEEK: 0x63,                      // E110 0011 Day of week
-    WEEK_NUMBER: 0x64,                      // E110 0100 Week number
-    TIME_POINT_OF_DAY_CHANGE: 0x65,         // E110 0101 Time point of day ...
-    STATE_OF_PARAMETER_ACTIVATION: 0x66,    // E110 0110 State of parameter
-    SPECIAL_SUPPLIER_INFORMATION: 0x67,     // E110 0111 Special supplier ...
-    DURATION_SINCE_LAST_CUMULATION: 0x6B,   // E110 10pp Duration since last
-    OPERATING_TIME_BATTERY: 0x6F,           // E110 11pp Operating time battery
-    DATEAND_TIME_OF_BATTERY_CHANGE: 0x70,   // E111 0000 Date and time of bat...
-    // E111 0001 to E111 1111 Reserved
-
-    RSSI: 0x71                             // E111 0001 RSSI
-}
-
-var VIFUnitSecExt = {
-    RELATIVE_HUMIDITY: 0x1A
-}
+var VIFUnitSecExt = function(name, value) {
+    this.name = name;
+    this.value = value;
+};
+VIFUnitSecExt.prototype.toString = function() {
+    return "VIFUnitSecExt." + this.name;
+};
+VIFUnitSecExt.RELATIVE_HUMIDITY = new VIFUnitSecExt("RELATIVE_HUMIDITY", 0x1A);
 
 
-var VIFTable = {
+const VIFTable = {
     // Primary VIFs [main table], range 0x00 - 0xFF
 
     lut: {
@@ -1490,7 +1549,7 @@ var VIFTable = {
     }
 }
 
-var TelegramDateMasks = {
+const TelegramDateMasks = {
     DATE: 0x02,             // "Auctual Date",            0010 Type G
     DATE_TIME: 0x04,        // "Actual Date and Time",    0100 Type F
     EXT_TIME: 0x03,         // "Extented Date",           0011 Type J
@@ -1512,8 +1571,11 @@ function DateCalculator() {
     this.SOMMERTIME = 0x40;           // 0100 0000
     this.LEAP_YEAR = 0x80;            // 1000 0000
     this.DIF_SOMMERTIME = 0xC0;       // 1100 0000
+    this.pad = "00";
 };
-
+DateCalculator.prototype.zeroPad = function(val) {
+    return (this.pad + val).slice(-this.pad.length);
+};
 DateCalculator.prototype.getTimeWithSeconds = function(second, minute, hour) {
     return this.getTime(minute, hour) + ":" + this.getSeconds(second);
 };
@@ -1521,7 +1583,7 @@ DateCalculator.prototype.getTime = function(minute, hour) {
     return this.getHour(hour) + ":" + this.getMinutes(minute);
 };
 DateCalculator.prototype.getDate = function(day, month, century) {
-    return this.getDay(day) + "." + this.getMonth(month) + "." + this.getYear(day, month, 0, false);
+    return this.getYear(day, month, 0, false) + '-' + this.getMonth(month) + '-' + this.getDay(day);
 };
 DateCalculator.prototype.getDateTime = function(minute, hour, day, month, century) {
     return this.getDate(day, month, century) + " " + this.getTime(minute, hour);
@@ -1530,19 +1592,19 @@ DateCalculator.prototype.getDateTimeWithSeconds = function(second, minute, hour,
     return this.getDate(day, month, century) + " " + this.getTimeWithSeconds(second, minute, hour);
 };
 DateCalculator.prototype.getSeconds = function(second) {
-    return second & this.SECOND_MASK;
+    return this.zeroPad(second & this.SECOND_MASK);
 };
 DateCalculator.prototype.getMinutes = function(minute) {
-    return minute & this.MINUTE_MASK;
+    return this.zeroPad(minute & this.MINUTE_MASK);
 };
 DateCalculator.prototype.getHour = function(hour) {
-    return hour & this.HOUR_MASK;
+    return this.zeroPad(hour & this.HOUR_MASK);
 };
 DateCalculator.prototype.getDay = function(day) {
-    return day & this.DAY_MASK;
+    return this.zeroPad(day & this.DAY_MASK);
 };
 DateCalculator.prototype.getMonth = function(month) {
-    return month & this.MONTH_MASK;
+    return this.zeroPad(month & this.MONTH_MASK);
 };
 DateCalculator.prototype.getYear = function(yearValue1, yearValue2, hundertYearValue, calcHundertYear) {
     var year1 = yearValue1 & this.YEAR_MASK;
@@ -1592,13 +1654,57 @@ DateCalculator.prototype.getYear = function(yearValue1, yearValue2, hundertYearV
             TelegramShort,
             TelegramLong
         ];
+
+        this.const = new Constants();
     };
 
-    MBus.prototype.load = function(data) {
+    MBus.prototype.isPrimaryAddress = function(address) {
+        return ((address >= 0x00) && (address <= 0xFF));
+    };
+
+    MBus.prototype.pingFrame = function(address, callback) {
+        if(this.isPrimaryAddress(address) === 0) {
+            throw "Invalid address " + address;
+        }
+
+        var frame = new TelegramShort();
+
+        frame.header.aField.parts = [address];
+        frame.header.cField.parts = [this.const.MBUS_CONTROL_MASK_SND_NKE | this.const.MBUS_CONTROL_MASK_DIR_M2S];
+
+        if(callback) {
+            callback.call(this, frame.toString());
+        } else {
+            return frame.toString();
+        }
+
+        return this; 
+    };
+
+    MBus.prototype.requestFrame = function(address, callback) {
+        if(this.isPrimaryAddress(address) === 0) {
+            throw "Invalid address " + address;
+        }
+
+        var frame = new TelegramShort();
+
+        frame.header.aField.parts = [address];
+        frame.header.cField.parts = [this.const.MBUS_CONTROL_MASK_REQ_UD2 | this.const.MBUS_CONTROL_MASK_DIR_M2S];
+
+        if(callback) {
+            callback.call(this, frame.toString());
+        } else {
+            return frame.toString();
+        }
+
+        return this; 
+    };
+
+    MBus.prototype.load = function(data, callback) {
         var retval = null;
 
         if(!data) {
-            throw "empty frame";
+            throw "Empty Frame";
         }
 
         if(typeof data == 'string') {
@@ -1607,17 +1713,21 @@ DateCalculator.prototype.getYear = function(yearValue1, yearValue2, hundertYearV
             });
         }
 
-        for (var i = this.telegrams.length - 1; i >= 0; i--) {
+        for (var i = this.telegrams.length - 1; i >= 0 && retval === null; i--) {
             try {
                 var t = new this.telegrams[i]();
                 t.parse(data);
                 retval = t;
-                break;
             } catch(err) {
                 if(err != 'Frame Mismatch') {
                     throw(err);
                 }
             }
+        }
+
+        if(callback) {
+            callback.call(retval);
+            return this;
         }
 
         return retval;

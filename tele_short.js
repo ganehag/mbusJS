@@ -13,12 +13,10 @@ TelegramShort.prototype.header = function(value) {
     }
     return self._header;
 };
-
-TelegramShort.prototype.compute_crc = function(first_argument) {
+TelegramShort.prototype.compute_crc = function() {
     // return this.header().cField.
 };
-
-TelegramShort.prototype.check_crc = function(first_argument) {
+TelegramShort.prototype.check_crc = function() {
     return this.compute_crc() === this.header().crcField.parts[0];
 };
 
